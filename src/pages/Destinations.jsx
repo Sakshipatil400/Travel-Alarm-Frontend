@@ -64,6 +64,7 @@ function Destinations() {
                     message: errMsg
                 });
                 localStorage.removeItem("token");
+                localStorage.removeItem("activeTrip");
                 navigate("/login", { state: { message: errMsg } });
             } else {
                 setError({
@@ -108,6 +109,7 @@ function Destinations() {
                         message: errMsg
                     });
                     localStorage.removeItem("token");
+                    localStorage.removeItem("activeTrip");
                     navigate("/login", { state: { message: errMsg } });
                 } else {
                     setError({
@@ -177,6 +179,7 @@ function Destinations() {
             setFormError(errMsg);
             if (err.response?.status === 401) {
                 localStorage.removeItem("token");
+                localStorage.removeItem("activeTrip");
                 setTimeout(() => navigate("/login", { state: { message: errMsg } }), 1200);
             }
         } finally {
@@ -272,6 +275,7 @@ function Destinations() {
             setEditError(errMsg);
             if (err.response?.status === 401) {
                 localStorage.removeItem("token");
+                localStorage.removeItem("activeTrip");
                 setTimeout(() => navigate("/login", { state: { message: errMsg } }), 1200);
             }
         } finally {
@@ -319,6 +323,7 @@ function Destinations() {
             setActionError(errMsg);
             if (err.response?.status === 401) {
                 localStorage.removeItem("token");
+                localStorage.removeItem("activeTrip");
                 setTimeout(() => navigate("/login", { state: { message: errMsg } }), 1200);
             }
         } finally {

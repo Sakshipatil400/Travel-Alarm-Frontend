@@ -1097,6 +1097,31 @@
     margin-top: 10px;
 }
 
+.empty-state-card.state-error {
+    border-color: rgba(239, 68, 68, 0.45);
+}
+
+.empty-state-card.state-error .empty-state-icon {
+    font-size: 48px;
+}
+
+/* Spinner Ring for Loading Active Trip */
+.loading-spinner-ring {
+    width: 44px;
+    height: 44px;
+    border: 3.5px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spinnerSpin 0.75s linear infinite;
+    margin: 4px auto 6px;
+}
+
+@keyframes spinnerSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .empty-btn-primary {
     display: inline-flex;
     align-items: center;
@@ -1108,6 +1133,9 @@
     font-size: 14px;
     font-weight: 600;
     text-decoration: none;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
     transition: opacity 0.2s, transform 0.2s;
 }
 
@@ -1128,6 +1156,8 @@
     font-size: 14px;
     font-weight: 600;
     text-decoration: none;
+    cursor: pointer;
+    font-family: inherit;
     transition: background 0.2s;
 }
 

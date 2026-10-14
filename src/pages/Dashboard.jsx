@@ -23,23 +23,23 @@ function Dashboard() {
         }
     });
 
-    // Sync activeTrip on storage / focus changes
+    // Sync activeTrip on storage changes across tabs
     useEffect(() => {
-        const handleSync = () => {
-            try {
-                const saved = localStorage.getItem("activeTrip");
-                setActiveTrip(saved ? JSON.parse(saved) : null);
-            } catch {
-                setActiveTrip(null);
+        const handleSync = (e) => {
+            if (e.key === "activeTrip") {
+                try {
+                    const saved = localStorage.getItem("activeTrip");
+                    setActiveTrip(saved ? JSON.parse(saved) : null);
+                } catch {
+                    setActiveTrip(null);
+                }
             }
         };
 
         window.addEventListener("storage", handleSync);
-        window.addEventListener("focus", handleSync);
 
         return () => {
             window.removeEventListener("storage", handleSync);
-            window.removeEventListener("focus", handleSync);
         };
     }, []);
 
@@ -72,6 +72,7 @@ function Dashboard() {
                         const authMsg = "Session expired. Please login again.";
                         setMessage(authMsg);
                         localStorage.removeItem("token");
+                        localStorage.removeItem("activeTrip");
                         navigate("/login", { state: { message: authMsg } });
                         return;
                     }
@@ -86,12 +87,60 @@ function Dashboard() {
                         ? rawTrips
                         : rawTrips?.$values || rawTrips?.data || [];
                     setTrips(tripsList);
+
+                    // Derive active trip from backend response as source of truth
+                    const activeList = tripsList.filter(
+                        (t) =>
+                            !t.endedAt &&
+                            !t.EndedAt &&
+                            t.status?.toLowerCase() !== "completed" &&
+                            t.status?.toLowerCase() !== "stopped" &&
+                            t.status?.toLowerCase() !== "ended" &&
+                            t.status?.toLowerCase() !== "cancelled"
+                    );
+
+                    if (activeList.length > 0) {
+                        activeList.sort(
+                            (a, b) =>
+                                new Date(b.startedAt || b.StartedAt || 0) -
+                                new Date(a.startedAt || a.StartedAt || 0)
+                        );
+                        const foundActive = activeList[0];
+                        const normalizedActive = {
+                            ...foundActive,
+                            id: foundActive.id || foundActive.Id,
+                            destinationId: foundActive.destinationId || foundActive.DestinationId,
+                            alertDistanceKm: foundActive.alertDistanceKm ?? foundActive.AlertDistanceKm,
+                            startedAt: foundActive.startedAt || foundActive.StartedAt,
+                            endedAt: foundActive.endedAt || foundActive.EndedAt || null,
+                            destinationName: foundActive.destinationName || foundActive.DestinationName,
+                            destination: foundActive.destination || foundActive.Destination,
+                            status: foundActive.status || foundActive.Status || "Active",
+                            alertTriggered: Boolean(
+                                foundActive.alertTriggered ?? foundActive.AlertTriggered
+                            )
+                        };
+                        setActiveTrip(normalizedActive);
+                        try {
+                            localStorage.setItem("activeTrip", JSON.stringify(normalizedActive));
+                        } catch {
+                            // ignore
+                        }
+                    } else {
+                        setActiveTrip(null);
+                        try {
+                            localStorage.removeItem("activeTrip");
+                        } catch {
+                            // ignore
+                        }
+                    }
                 } else {
                     console.error("Dashboard error loading trips:", tripsRes.reason);
                     if (tripsRes.reason?.response?.status === 401) {
                         const authMsg = "Session expired. Please login again.";
                         setMessage(authMsg);
                         localStorage.removeItem("token");
+                        localStorage.removeItem("activeTrip");
                         navigate("/login", { state: { message: authMsg } });
                         return;
                     }
@@ -110,6 +159,7 @@ function Dashboard() {
                     setMessage(errText);
                     if (error?.response?.status === 401) {
                         localStorage.removeItem("token");
+                        localStorage.removeItem("activeTrip");
                         navigate("/login", { state: { message: errText } });
                     }
                 }
@@ -152,6 +202,7 @@ function Dashboard() {
                     const authMsg = "Session expired. Please login again.";
                     setMessage(authMsg);
                     localStorage.removeItem("token");
+                    localStorage.removeItem("activeTrip");
                     navigate("/login", { state: { message: authMsg } });
                     return;
                 }
@@ -165,11 +216,59 @@ function Dashboard() {
                     ? rawTrips
                     : rawTrips?.$values || rawTrips?.data || [];
                 setTrips(tripsList);
+
+                // Derive active trip from backend response as source of truth
+                const activeList = tripsList.filter(
+                    (t) =>
+                        !t.endedAt &&
+                        !t.EndedAt &&
+                        t.status?.toLowerCase() !== "completed" &&
+                        t.status?.toLowerCase() !== "stopped" &&
+                        t.status?.toLowerCase() !== "ended" &&
+                        t.status?.toLowerCase() !== "cancelled"
+                );
+
+                if (activeList.length > 0) {
+                    activeList.sort(
+                        (a, b) =>
+                            new Date(b.startedAt || b.StartedAt || 0) -
+                            new Date(a.startedAt || a.StartedAt || 0)
+                    );
+                    const foundActive = activeList[0];
+                    const normalizedActive = {
+                        ...foundActive,
+                        id: foundActive.id || foundActive.Id,
+                        destinationId: foundActive.destinationId || foundActive.DestinationId,
+                        alertDistanceKm: foundActive.alertDistanceKm ?? foundActive.AlertDistanceKm,
+                        startedAt: foundActive.startedAt || foundActive.StartedAt,
+                        endedAt: foundActive.endedAt || foundActive.EndedAt || null,
+                        destinationName: foundActive.destinationName || foundActive.DestinationName,
+                        destination: foundActive.destination || foundActive.Destination,
+                        status: foundActive.status || foundActive.Status || "Active",
+                        alertTriggered: Boolean(
+                            foundActive.alertTriggered ?? foundActive.AlertTriggered
+                        )
+                    };
+                    setActiveTrip(normalizedActive);
+                    try {
+                        localStorage.setItem("activeTrip", JSON.stringify(normalizedActive));
+                    } catch {
+                        // ignore
+                    }
+                } else {
+                    setActiveTrip(null);
+                    try {
+                        localStorage.removeItem("activeTrip");
+                    } catch {
+                        // ignore
+                    }
+                }
             } else {
                 if (tripsRes.reason?.response?.status === 401) {
                     const authMsg = "Session expired. Please login again.";
                     setMessage(authMsg);
                     localStorage.removeItem("token");
+                    localStorage.removeItem("activeTrip");
                     navigate("/login", { state: { message: authMsg } });
                     return;
                 }
@@ -187,6 +286,7 @@ function Dashboard() {
             setMessage(errText);
             if (error?.response?.status === 401) {
                 localStorage.removeItem("token");
+                localStorage.removeItem("activeTrip");
                 navigate("/login", { state: { message: errText } });
             }
         } finally {

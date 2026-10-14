@@ -11,9 +11,50 @@ const isRawGuid = (val) =>
     (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim()) ||
         val.trim().toLowerCase().startsWith("destination #"));
 
+// Helper to check if a trip from the Trips API is active
+const isTripActive = (tripItem) => {
+    if (!tripItem || typeof tripItem !== "object") return false;
+
+    // 1. EndedAt / endedAt timestamp check: If endedAt exists, trip is not active
+    const endedAt = tripItem.endedAt || tripItem.EndedAt;
+    if (endedAt) return false;
+
+    // 2. IsActive / isActive boolean check if explicitly present
+    const isActiveFlag = tripItem.isActive ?? tripItem.IsActive;
+    if (typeof isActiveFlag === "boolean") {
+        if (!isActiveFlag) return false;
+    }
+
+    // 3. Status string check if defined
+    const status = (tripItem.status || tripItem.Status || "").trim().toLowerCase();
+    if (status) {
+        if (
+            status === "completed" ||
+            status === "stopped" ||
+            status === "ended" ||
+            status === "cancelled" ||
+            status === "inactive"
+        ) {
+            return false;
+        }
+        if (
+            status === "active" ||
+            status === "ongoing" ||
+            status === "in progress" ||
+            status === "started"
+        ) {
+            return true;
+        }
+    }
+
+    // Default: if it has not ended, it is considered active
+    return !endedAt;
+};
+
 function ActiveTrip() {
     const navigate = useNavigate();
-    // 1. Active trip is loaded from localStorage using "activeTrip"
+
+    // Source of truth: active trip retrieved from backend API
     const [trip, setTrip] = useState(() => {
         try {
             const savedTrip = localStorage.getItem("activeTrip");
@@ -23,25 +64,15 @@ function ActiveTrip() {
         }
     });
 
+    // Loading and error states for active trip retrieval from API
+    const [isLoadingTrip, setIsLoadingTrip] = useState(true);
+    const [tripError, setTripError] = useState(null);
+
     const [location, setLocation] = useState(null);
     const [result, setResult] = useState(null);
-    const [message, setMessage] = useState(() => {
-        try {
-            const savedTrip = localStorage.getItem("activeTrip");
-            return savedTrip ? "" : "No active trip found.";
-        } catch {
-            return "No active trip found.";
-        }
-    });
+    const [message, setMessage] = useState("");
     const [alarmPlayed, setAlarmPlayed] = useState(false);
-    const [trackingActive, setTrackingActive] = useState(() => {
-        try {
-            const savedTrip = localStorage.getItem("activeTrip");
-            return Boolean(savedTrip);
-        } catch {
-            return false;
-        }
-    });
+    const [trackingActive, setTrackingActive] = useState(false);
 
     // Loading states to prevent duplicate actions
     const [isCheckingLocation, setIsCheckingLocation] = useState(false);
@@ -98,28 +129,181 @@ function ActiveTrip() {
         alarmPlayedRef.current = alarmPlayed;
     }, [alarmPlayed]);
 
-    // Sync trip state with localStorage on window focus or storage changes
-    useEffect(() => {
-        const handleSync = () => {
-            try {
-                const saved = localStorage.getItem("activeTrip");
-                if (saved) {
-                    const parsed = JSON.parse(saved);
-                    setTrip(parsed);
-                    tripRef.current = parsed;
-                    setTrackingActive(true);
+    // Retrieve logged-in user's trips from existing API as source of truth
+    const fetchActiveTrip = useCallback(async () => {
+        const token = localStorage.getItem("token");
+        if (!token) {
+            navigate("/login");
+            return;
+        }
+
+        setIsLoadingTrip(true);
+        setTripError(null);
+
+        try {
+            const [tripsRes, destsRes] = await Promise.allSettled([
+                api.get("/Trips"),
+                api.get("/Destinations")
+            ]);
+
+            if (tripsRes.status === "rejected") {
+                const err = tripsRes.reason;
+                console.error("Trip retrieval error:", err);
+                const errMsg = getApiErrorMessage(err, "Unable to load active trip.");
+                if (err?.response?.status === 401) {
+                    localStorage.removeItem("token");
+                    localStorage.removeItem("activeTrip");
+                    navigate("/login", { state: { message: errMsg } });
+                    return;
                 }
-            } catch {
-                // ignore
+                setTripError(errMsg);
+                return;
+            }
+
+            const rawTrips = tripsRes.value?.data;
+            const tripsList = Array.isArray(rawTrips)
+                ? rawTrips
+                : Array.isArray(rawTrips?.$values)
+                ? rawTrips.$values
+                : Array.isArray(rawTrips?.data)
+                ? rawTrips.data
+                : [];
+
+            // Build map of destination ID -> Destination Name
+            const destMap = {};
+            if (destsRes.status === "fulfilled" && destsRes.value?.data) {
+                const rawDests = destsRes.value.data;
+                const destList = Array.isArray(rawDests)
+                    ? rawDests
+                    : Array.isArray(rawDests?.$values)
+                    ? rawDests.$values
+                    : Array.isArray(rawDests?.data)
+                    ? rawDests.data
+                    : [];
+
+                destList.forEach((d) => {
+                    if (d?.id && d?.name) {
+                        destMap[d.id] = d.name;
+                        destMap[String(d.id).toLowerCase()] = d.name;
+                    }
+                });
+            }
+
+            const activeTrips = tripsList.filter(isTripActive);
+
+            if (activeTrips.length > 0) {
+                // Sort by startedAt descending (most recent first)
+                activeTrips.sort(
+                    (a, b) =>
+                        new Date(b.startedAt || b.StartedAt || 0) -
+                        new Date(a.startedAt || a.StartedAt || 0)
+                );
+
+                const rawActive = activeTrips[0];
+                const destId = rawActive.destinationId || rawActive.DestinationId;
+                const destName =
+                    rawActive.destinationName ||
+                    rawActive.DestinationName ||
+                    (rawActive.destination?.name ? rawActive.destination.name : null) ||
+                    destMap[destId] ||
+                    destMap[String(destId).toLowerCase()] ||
+                    "";
+
+                const normalizedTrip = {
+                    ...rawActive,
+                    id: rawActive.id || rawActive.Id,
+                    destinationId: destId,
+                    alertDistanceKm: rawActive.alertDistanceKm ?? rawActive.AlertDistanceKm,
+                    startedAt: rawActive.startedAt || rawActive.StartedAt,
+                    endedAt: rawActive.endedAt || rawActive.EndedAt || null,
+                    destinationName: destName,
+                    destination: rawActive.destination || rawActive.Destination,
+                    status: rawActive.status || rawActive.Status || "Active",
+                    alertTriggered: Boolean(
+                        rawActive.alertTriggered ?? rawActive.AlertTriggered
+                    )
+                };
+
+                setTrip(normalizedTrip);
+                tripRef.current = normalizedTrip;
+                setTrackingActive(true);
+
+                if (destName && !isRawGuid(destName)) {
+                    setDestinationName(destName);
+                }
+
+                if (normalizedTrip.alertTriggered) {
+                    setMessage("🚨 You have reached the alert distance!");
+                    setResult((prev) => prev || { triggered: true });
+                }
+
+                try {
+                    localStorage.setItem("activeTrip", JSON.stringify(normalizedTrip));
+                } catch {
+                    // ignore localStorage quota errors
+                }
+            } else {
+                // Backend confirmed: No active trip exists
+                setTrip(null);
+                tripRef.current = null;
+                setTrackingActive(false);
+                setMessage("No active trip found.");
+                try {
+                    localStorage.removeItem("activeTrip");
+                } catch {
+                    // ignore
+                }
+            }
+        } catch (error) {
+            console.error("ActiveTrip load error:", error);
+            const errMsg = getApiErrorMessage(error, "Unable to load active trip.");
+            if (error?.response?.status === 401) {
+                localStorage.removeItem("token");
+                localStorage.removeItem("activeTrip");
+                navigate("/login", { state: { message: errMsg } });
+                return;
+            }
+            setTripError(errMsg);
+        } finally {
+            setIsLoadingTrip(false);
+        }
+    }, [navigate]);
+
+    // Initial fetch on mount
+    useEffect(() => {
+        fetchActiveTrip();
+    }, [fetchActiveTrip]);
+
+    // Sync trip state with localStorage if changes happen in other tabs of same browser
+    useEffect(() => {
+        const handleStorageChange = (e) => {
+            if (e.key === "activeTrip") {
+                if (!e.newValue) {
+                    // Trip was stopped in another tab
+                    setTrip(null);
+                    tripRef.current = null;
+                    setTrackingActive(false);
+                    if (watchIdRef.current !== null) {
+                        navigator.geolocation.clearWatch(watchIdRef.current);
+                        watchIdRef.current = null;
+                    }
+                } else {
+                    try {
+                        const parsed = JSON.parse(e.newValue);
+                        setTrip(parsed);
+                        tripRef.current = parsed;
+                        setTrackingActive(true);
+                    } catch {
+                        // ignore
+                    }
+                }
             }
         };
 
-        window.addEventListener("storage", handleSync);
-        window.addEventListener("focus", handleSync);
+        window.addEventListener("storage", handleStorageChange);
 
         return () => {
-            window.removeEventListener("storage", handleSync);
-            window.removeEventListener("focus", handleSync);
+            window.removeEventListener("storage", handleStorageChange);
         };
     }, []);
 
@@ -406,16 +590,22 @@ function ActiveTrip() {
                     stopLocationTracking();
                     stopAlarmLoop();
                     localStorage.removeItem("token");
+                    localStorage.removeItem("activeTrip");
                     setTimeout(() => navigate("/login", { state: { message: errMsg } }), 1200);
                 }
             }
         },
-        [trip, stopLocationTracking, startAlarmLoop, stopAlarmLoop, navigate]
+        [stopLocationTracking, startAlarmLoop, stopAlarmLoop, navigate]
     );
 
     // Start GPS tracking via navigator.geolocation.watchPosition
     useEffect(() => {
-        if (!trip) {
+        const activeTripId = trip?.id;
+        if (!activeTripId) {
+            if (watchIdRef.current !== null) {
+                navigator.geolocation.clearWatch(watchIdRef.current);
+                watchIdRef.current = null;
+            }
             return;
         }
 
@@ -427,9 +617,10 @@ function ActiveTrip() {
             return () => clearTimeout(timer);
         }
 
-        // Prevent multiple watchers
+        // Prevent duplicate watchers: clear existing watcher before setting up a new one
         if (watchIdRef.current !== null) {
-            return;
+            navigator.geolocation.clearWatch(watchIdRef.current);
+            watchIdRef.current = null;
         }
 
         const watchId = navigator.geolocation.watchPosition(
@@ -459,15 +650,16 @@ function ActiveTrip() {
         );
 
         watchIdRef.current = watchId;
+        setTrackingActive(true);
 
-        // Cleanup when leaving page
+        // Cleanup when leaving page or when trip changes
         return () => {
             if (watchIdRef.current !== null) {
                 navigator.geolocation.clearWatch(watchIdRef.current);
                 watchIdRef.current = null;
             }
         };
-    }, [trip, sendLocationToBackend]);
+    }, [trip?.id, sendLocationToBackend]);
 
     // Fetch destination name matching trip.destinationId from existing Destinations API
     useEffect(() => {
@@ -532,6 +724,7 @@ function ActiveTrip() {
                     const errMsg = getApiErrorMessage(error);
                     setMessage(errMsg);
                     localStorage.removeItem("token");
+                    localStorage.removeItem("activeTrip");
                     navigate("/login", { state: { message: errMsg } });
                 }
             }
@@ -669,6 +862,7 @@ function ActiveTrip() {
             if (error.response?.status === 401) {
                 stopLocationTracking();
                 localStorage.removeItem("token");
+                localStorage.removeItem("activeTrip");
                 setTimeout(() => navigate("/login", { state: { message: errMsg } }), 1200);
             }
         } finally {
@@ -759,7 +953,55 @@ function ActiveTrip() {
 
     const messageCategory = getMessageCategory(message);
 
-    // Empty state: No active trip
+    // Loading state while retrieving active trip from backend
+    if (isLoadingTrip) {
+        return (
+            <div className="active-trip-container">
+                <Navbar />
+
+                <div className="active-trip-empty-wrapper">
+                    <div className="empty-state-card" role="status" aria-live="polite">
+                        <div className="loading-spinner-ring" aria-hidden="true"></div>
+                        <h1 className="empty-state-title">Loading Active Trip...</h1>
+                        <p className="empty-state-desc">
+                            Checking your travel monitoring status from the server...
+                        </p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // Error state if API request failed (instead of incorrectly showing "No active trip found")
+    if (tripError) {
+        return (
+            <div className="active-trip-container">
+                <Navbar />
+
+                <div className="active-trip-empty-wrapper">
+                    <div className="empty-state-card state-error" role="alert">
+                        <div className="empty-state-icon" aria-hidden="true">⚠️</div>
+                        <h1 className="empty-state-title">Unable to Load Active Trip</h1>
+                        <p className="empty-state-desc">{tripError}</p>
+                        <div className="empty-state-actions">
+                            <button
+                                type="button"
+                                onClick={fetchActiveTrip}
+                                className="empty-btn-primary"
+                            >
+                                <span aria-hidden="true">🔄</span> Try Again
+                            </button>
+                            <Link to="/dashboard" className="empty-btn-secondary">
+                                <span aria-hidden="true">📋</span> Go to Dashboard
+                            </Link>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // Empty state: Confirmed by backend response that no active trip exists
     if (!trip) {
         return (
             <div className="active-trip-container">

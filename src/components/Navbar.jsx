@@ -47,9 +47,12 @@ function Navbar() {
         return "Traveler";
     });
 
-    // Reuse existing logout functionality: remove token and redirect to /login
+    // Logout: clear user-specific cached trip information and token without stopping the database trip
     const handleLogout = () => {
         localStorage.removeItem("token");
+        localStorage.removeItem("activeTrip");
+        localStorage.removeItem("userName");
+        localStorage.removeItem("user");
         navigate("/login");
     };
 

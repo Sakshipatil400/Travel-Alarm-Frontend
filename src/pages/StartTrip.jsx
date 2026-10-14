@@ -42,6 +42,7 @@ function StartTrip() {
             setDestinationsError(errMsg);
             if (error.response?.status === 401) {
                 localStorage.removeItem("token");
+                localStorage.removeItem("activeTrip");
                 navigate("/login", { state: { message: errMsg } });
             }
         } finally {
@@ -77,6 +78,7 @@ function StartTrip() {
                     setDestinationsError(errMsg);
                     if (error.response?.status === 401) {
                         localStorage.removeItem("token");
+                        localStorage.removeItem("activeTrip");
                         navigate("/login", { state: { message: errMsg } });
                     }
                 }
@@ -145,6 +147,7 @@ function StartTrip() {
             setMessage(errMsg);
             if (error.response?.status === 401) {
                 localStorage.removeItem("token");
+                localStorage.removeItem("activeTrip");
                 setTimeout(() => navigate("/login", { state: { message: errMsg } }), 1200);
             }
         } finally {

@@ -83,6 +83,7 @@ function TripHistory() {
                 const errMsg = getApiErrorMessage(err, "Unable to load trip history.");
                 if (err.response?.status === 401) {
                     localStorage.removeItem("token");
+                    localStorage.removeItem("activeTrip");
                     navigate("/login", { state: { message: errMsg } });
                     return;
                 }
@@ -150,6 +151,7 @@ function TripHistory() {
             const errMsg = getApiErrorMessage(err, "Unable to load trip history.");
             if (err.response?.status === 401) {
                 localStorage.removeItem("token");
+                localStorage.removeItem("activeTrip");
                 navigate("/login", { state: { message: errMsg } });
                 return;
             }
